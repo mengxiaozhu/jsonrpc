@@ -70,14 +70,32 @@ var emptyErrorType = reflect.TypeOf(&emptyErr).Elem()
 
 func (f *Factory) makeFunc(serviceName string, methodName string, fn reflect.Type) reflect.Value {
 	resultType := fn.Out(0)
-	return reflect.MakeFunc(fn, func(args []reflect.Value) (results []reflect.Value) {
-		ctx, _ := context.WithTimeout(f.Context, f.Timeout)
-		returnValue := reflect.New(resultType)
-		err := f.Sender(serviceName+"."+methodName, ctx, args[0].Interface(), returnValue.Interface())
-		if err == nil {
-			return []reflect.Value{returnValue.Elem(), reflect.New(emptyErrorType).Elem()}
-		} else {
-			return []reflect.Value{returnValue.Elem(), reflect.ValueOf(&err).Elem()}
-		}
-	})
+	name := serviceName + "." + methodName
+	fi := &methodInfo{
+		name:       name,
+		resultType: resultType,
+		ctx:        f.Context,
+		Timeout:    f.Timeout,
+		Sender:     f.Sender,
+	}
+	return reflect.MakeFunc(fn, fi.Do)
+}
+
+type methodInfo struct {
+	name       string
+	resultType reflect.Type
+	ctx        context.Context
+	Sender     Sender
+	Timeout    time.Duration
+}
+
+func (info *methodInfo) Do(args []reflect.Value) (results []reflect.Value) {
+	ctx, _ := context.WithTimeout(info.ctx, info.Timeout)
+	returnValue := reflect.New(info.resultType)
+	err := info.Sender(info.name, ctx, args[0].Interface(), returnValue.Interface())
+	if err == nil {
+		return []reflect.Value{returnValue.Elem(), reflect.New(emptyErrorType).Elem()}
+	} else {
+		return []reflect.Value{returnValue.Elem(), reflect.ValueOf(&err).Elem()}
+	}
 }
