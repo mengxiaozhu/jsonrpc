@@ -26,6 +26,8 @@ func New(target string, poolsize int) *Factory {
 		return jsonrpc.NewClient(conn), nil
 
 	}).Send
+	factory.Context = context.Background()
+	factory.Timeout = 20 * time.Second
 	return factory
 }
 
