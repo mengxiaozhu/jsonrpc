@@ -3,6 +3,8 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"net"
+	"net/rpc/jsonrpc"
 	"reflect"
 	"time"
 )
@@ -13,8 +15,22 @@ var (
 
 type Sender func(name string, ctx context.Context, input interface{}, output interface{}) error
 
+func New(target string, poolsize int) *Factory {
+	factory := &Factory{}
+	factory.Sender = NewFixedPool(poolsize, func(ctx context.Context) (Caller, error) {
+		var d net.Dialer
+		conn, err := d.DialContext(ctx, "tcp", target)
+		if err != nil {
+			return nil, err
+		}
+		return jsonrpc.NewClient(conn), nil
+
+	}).Send
+	return factory
+}
+
 type Factory struct {
-	MethodNameFilter func(string) string
+	MethodNameMapper func(string) string
 	Sender           Sender
 	Context          context.Context
 	Timeout          time.Duration
@@ -33,8 +49,8 @@ func (f *Factory) Inject(name string, obj interface{}) error {
 		field := structType.Field(i)
 		methodName := field.Tag.Get("rpc")
 		if methodName == "" {
-			if f.MethodNameFilter != nil {
-				methodName = f.MethodNameFilter(field.Name)
+			if f.MethodNameMapper != nil {
+				methodName = f.MethodNameMapper(field.Name)
 			} else {
 				methodName = field.Name
 			}
