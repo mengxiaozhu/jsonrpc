@@ -46,7 +46,5 @@ func (c *LateInitCaller) Clear(version uint64) {
 	if !ok {
 		return
 	}
-	c.lock.Lock()
 	c.client.Store(emptyVersionedCaller)
-	c.lock.Unlock()
 }

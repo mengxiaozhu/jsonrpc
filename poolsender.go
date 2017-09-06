@@ -7,12 +7,6 @@ import (
 	"sync/atomic"
 )
 
-// *jsonrpc.Client
-type Caller interface {
-	Call(serviceMethod string, args interface{}, reply interface{}) error
-}
-type CallerFactory func(ctx context.Context) (Caller, error)
-
 type PoolSender struct {
 	clients []*LateInitCaller
 	size    int
@@ -30,7 +24,7 @@ func NewFixedPool(size int, factory CallerFactory) *PoolSender {
 	return cp
 }
 
-func (c *PoolSender) Send(method string, ctx context.Context, v interface{}, resp interface{}) error {
+func (c *PoolSender) Send(method string, ctx context.Context, v []interface{}, resp interface{}) error {
 	delay := c.clients[atomic.AddUint64(&c.times, 1)%uint64(c.size)]
 	client, err := delay.Get(ctx)
 	if err != nil {

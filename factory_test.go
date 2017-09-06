@@ -15,7 +15,7 @@ type structForTest struct {
 
 func BenchmarkFactory_Inject(b *testing.B) {
 	factory := Factory{
-		Sender: func(name string, ctx context.Context, input interface{}, output interface{}) error {
+		Sender: func(name string, ctx context.Context, input []interface{}, output interface{}) error {
 			switch name {
 			case "serv.add":
 				ptr := output.(*int)
@@ -47,7 +47,7 @@ func BenchmarkFactory_Inject(b *testing.B) {
 
 func TestFactory_Inject(t *testing.T) {
 	factory := Factory{
-		Sender: func(name string, ctx context.Context, input interface{}, output interface{}) error {
+		Sender: func(name string, ctx context.Context, input []interface{}, output interface{}) error {
 			switch name {
 			case "serv.add":
 				ptr := output.(*int)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"net/rpc/jsonrpc"
 	"reflect"
 	"time"
 )
@@ -13,7 +12,7 @@ var (
 	ErrorInjectObjectMustBePointerOfStruct = errors.New("inject object must be pointer of struct")
 )
 
-type Sender func(name string, ctx context.Context, input interface{}, output interface{}) error
+type Sender func(name string, ctx context.Context, input []interface{}, output interface{}) error
 
 func New(target string, poolsize int) *Factory {
 	factory := &Factory{}
@@ -23,7 +22,7 @@ func New(target string, poolsize int) *Factory {
 		if err != nil {
 			return nil, err
 		}
-		return jsonrpc.NewClient(conn), nil
+		return NewTcpClient(conn), nil
 
 	}).Send
 	factory.Context = context.Background()
@@ -58,7 +57,7 @@ func (f *Factory) Inject(name string, obj interface{}) error {
 			}
 		}
 		if structValue.Field(i).CanSet() {
-			if field.Type.Kind() == reflect.Func && f.funcType(field.Type) == OneArgWithErrorReturn {
+			if field.Type.Kind() == reflect.Func {
 				structValue.Field(i).Set(f.makeFunc(name, methodName, field.Type))
 			}
 		}
@@ -110,7 +109,11 @@ type methodInfo struct {
 func (info *methodInfo) Do(args []reflect.Value) (results []reflect.Value) {
 	ctx, _ := context.WithTimeout(info.ctx, info.Timeout)
 	returnValue := reflect.New(info.resultType)
-	err := info.Sender(info.name, ctx, args[0].Interface(), returnValue.Interface())
+	params := []interface{}{}
+	for _, v := range args {
+		params = append(params, v.Interface())
+	}
+	err := info.Sender(info.name, ctx, params, returnValue.Interface())
 	if err == nil {
 		return []reflect.Value{returnValue.Elem(), reflect.New(emptyErrorType).Elem()}
 	} else {

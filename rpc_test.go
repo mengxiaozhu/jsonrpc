@@ -3,9 +3,9 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"github.com/powerman/rpc-codec/jsonrpc2"
 	"net"
 	"net/rpc"
-	"net/rpc/jsonrpc"
 	"testing"
 	"time"
 )
@@ -13,7 +13,7 @@ import (
 const serviceName = "halo"
 
 type ServerInterface struct {
-	Add func(i int) (j int, err error) `rpc:"add"`
+	Add func(i int) (j int, err error) `rpc:"Add"`
 }
 
 func TestRPC(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRPC(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			return jsonrpc.NewClient(conn), nil
+			return NewTcpClient(conn), nil
 
 		}).Send,
 		Timeout: time.Second,
@@ -39,16 +39,15 @@ func TestRPC(t *testing.T) {
 	}
 	for i := 0; i < 50; i++ {
 		time.Sleep(time.Millisecond * 100)
-		fmt.Println(itfc.Add(90))
+		fmt.Println(itfc.Add(90 + i))
 	}
 }
 
 type Impl struct {
 }
 
-func (f *Impl) Add(i int, j *int) (err error) {
-	*j = i / 2
-	return nil
+func (f *Impl) Add(i int) (j int, err error) {
+	return i / 2, nil
 }
 func BenchmarkRPC(b *testing.B) {
 	go server()
@@ -60,7 +59,7 @@ func BenchmarkRPC(b *testing.B) {
 			if err != nil {
 				return nil, err
 			}
-			return jsonrpc.NewClient(conn), nil
+			return NewTcpClient(conn), nil
 
 		}).Send,
 		Timeout: time.Second,
@@ -92,21 +91,12 @@ func server() {
 		if err != nil {
 			panic(err)
 		}
-		go server.ServeCodec(jsonrpc.NewServerCodec(conn))
+		go server.ServeCodec(jsonrpc2.NewServerCodec(conn, nil))
 	}
 }
 func onceServer() {
-	listener, _ := net.Listen("tcp", ":12345")
-	server := rpc.NewServer()
-	server.RegisterName(serviceName, &Impl{})
-	conn, err := listener.Accept()
-	if err != nil {
-		panic(err)
-	}
-	go server.ServeCodec(jsonrpc.NewServerCodec(conn))
-	time.AfterFunc(time.Second, func() {
-		conn.Close()
-	})
-	listener.Close()
+	server := NewTcpServer()
+	server.Register(serviceName, &Impl{})
+	server.Run(":12345")
 	return
 }

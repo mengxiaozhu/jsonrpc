@@ -10,7 +10,7 @@ import (
 type callerForTest struct {
 }
 
-func (c *callerForTest) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (c *callerForTest) Call(serviceMethod string, args []interface{}, reply interface{}) error {
 	return nil
 }
 func TestLateInitCaller_Get(t *testing.T) {
