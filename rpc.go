@@ -5,6 +5,8 @@ import (
 	"net"
 )
 
+type Sender func(name string, ctx context.Context, input []interface{}, output interface{}) error
+
 type Caller interface {
 	Call(serviceMethod string, args []interface{}, reply interface{}) error
 }

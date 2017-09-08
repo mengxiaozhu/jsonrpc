@@ -2,19 +2,12 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"net"
 	"reflect"
 	"time"
 )
 
-var (
-	ErrorInjectObjectMustBePointerOfStruct = errors.New("inject object must be pointer of struct")
-)
-
-type Sender func(name string, ctx context.Context, input []interface{}, output interface{}) error
-
-func New(target string, poolsize int) *Factory {
+func NewFactory(target string, poolsize int) *Factory {
 	factory := &Factory{}
 	factory.Sender = NewFixedPool(poolsize, func(ctx context.Context) (Caller, error) {
 		var d net.Dialer
@@ -22,7 +15,7 @@ func New(target string, poolsize int) *Factory {
 		if err != nil {
 			return nil, err
 		}
-		return NewTcpClient(conn), nil
+		return NewClientConn(conn), nil
 
 	}).Send
 	factory.Context = context.Background()
@@ -69,17 +62,17 @@ type ValidFuncType uint
 
 const (
 	Invalid ValidFuncType = iota
-	OneArgWithErrorReturn
+	respWithErrorReturn
 )
 
-func (f *Factory) funcType(fn reflect.Type) ValidFuncType {
+func (f *Factory) checkFuncType(fn reflect.Type) ValidFuncType {
 	if fn.NumIn() != 1 || fn.NumOut() != 2 {
 		return Invalid
 	}
 	if fn.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
 		return Invalid
 	}
-	return OneArgWithErrorReturn
+	return respWithErrorReturn
 }
 
 var emptyErr error

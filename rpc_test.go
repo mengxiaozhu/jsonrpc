@@ -3,9 +3,10 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"github.com/powerman/rpc-codec/jsonrpc2"
 	"net"
 	"net/rpc"
+	"net/rpc/jsonrpc"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -13,22 +14,17 @@ import (
 const serviceName = "halo"
 
 type ServerInterface struct {
-	Add func(i int) (j int, err error) `rpc:"Add"`
+	Add func(i int) (j string, err error) `rpc:"Add"`
 }
 
 func TestRPC(t *testing.T) {
 	go onceServer()
-	dialer := &net.Dialer{}
+	callerFactory := &ClientConnCallerFactory{
+		target: "127.0.0.1:12345",
+	}
 	f := &Factory{
 		Context: context.Background(),
-		Sender: NewFixedPool(20, func(ctx context.Context) (Caller, error) {
-			conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:12345")
-			if err != nil {
-				return nil, err
-			}
-			return NewTcpClient(conn), nil
-
-		}).Send,
+		Sender:  NewFixedPool(20, callerFactory.Create).Send,
 		Timeout: time.Second,
 	}
 	itfc := &ServerInterface{}
@@ -46,26 +42,47 @@ func TestRPC(t *testing.T) {
 type Impl struct {
 }
 
-func (f *Impl) Add(i int) (j int, err error) {
-	return i / 2, nil
+func (f *Impl) Add(i int) (j string, err error) {
+	return strconv.Itoa(i / 2), nil
+}
+
+type Impl2 struct {
+}
+
+func (f *Impl2) Add(i int, j *string) (err error) {
+	*j = strconv.Itoa(i / 2)
+	return nil
+}
+func BenchmarkRPC3(b *testing.B) {
+	go jsonrpcserver()
+	time.Sleep(1 * time.Second)
+	c, err := jsonrpc.Dial("tcp", "127.0.0.1:12346")
+	if err != nil {
+		panic(err)
+	}
+	b.Run("benchmark", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				k := ""
+				c.Call(serviceName+"."+"Add", 2, &k)
+			}
+		})
+	})
 }
 func BenchmarkRPC(b *testing.B) {
 	go server()
-	dialer := &net.Dialer{}
-	f := &Factory{
-		Context: context.Background(),
-		Sender: NewFixedPool(40, func(ctx context.Context) (Caller, error) {
-			conn, err := dialer.DialContext(ctx, "tcp", "127.0.0.1:12346")
-			if err != nil {
-				return nil, err
-			}
-			return NewTcpClient(conn), nil
+	time.Sleep(1 * time.Second)
 
-		}).Send,
+	callerFactory := &ClientConnCallerFactory{
+		target: "127.0.0.1:12345",
+	}
+	factory := &Factory{
+		Context: context.Background(),
+		Sender:  NewFixedPool(10, callerFactory.Create).Send,
 		Timeout: time.Second,
 	}
 	itfc := &ServerInterface{}
-	err := f.Inject(serviceName, itfc)
+	err := factory.Inject(serviceName, itfc)
 	if err != nil {
 		panic(err)
 		return
@@ -77,25 +94,53 @@ func BenchmarkRPC(b *testing.B) {
 			}
 		})
 	})
-
 }
-func server() {
-	listener, err := net.Listen("tcp", ":12346")
+func BenchmarkRPC2(b *testing.B) {
+	go jsonrpcserver()
+	callerFactory := &ClientConnCallerFactory{
+		target: "127.0.0.1:12346",
+	}
+	factory := &Factory{
+		Context: context.Background(),
+		Sender:  NewFixedPool(100, callerFactory.Create).Send,
+		Timeout: time.Second,
+	}
+	itfc := &ServerInterface{}
+	err := factory.Inject(serviceName, itfc)
+	if err != nil {
+		panic(err)
+		return
+	}
+	b.Run("benchmark", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				itfc.Add(2)
+			}
+		})
+	})
+}
+func jsonrpcserver() {
+	l, err := net.Listen("tcp", "127.0.0.1:12346")
 	if err != nil {
 		panic(err)
 	}
-	server := rpc.NewServer()
-	server.RegisterName(serviceName, &Impl{})
+	rpc.RegisterName(serviceName, &Impl2{})
 	for {
-		conn, err := listener.Accept()
+		conn, err := l.Accept()
 		if err != nil {
 			panic(err)
 		}
-		go server.ServeCodec(jsonrpc2.NewServerCodec(conn, nil))
+		go jsonrpc.ServeConn(conn)
 	}
 }
+func server() {
+	server := NewServer()
+	server.Register(serviceName, &Impl{})
+	server.Run(":12345")
+	return
+}
 func onceServer() {
-	server := NewTcpServer()
+	server := NewServer()
 	server.Register(serviceName, &Impl{})
 	server.Run(":12345")
 	return

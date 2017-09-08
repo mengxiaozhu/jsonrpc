@@ -2,13 +2,11 @@ package jsonrpc
 
 import (
 	"context"
-	"net"
-	"net/rpc"
 	"sync/atomic"
 )
 
 type PoolSender struct {
-	clients []*LateInitCaller
+	callers []*LateInitCaller
 	size    int
 	times   uint64
 }
@@ -16,23 +14,23 @@ type PoolSender struct {
 func NewFixedPool(size int, factory CallerFactory) *PoolSender {
 	cp := &PoolSender{
 		size:    size,
-		clients: make([]*LateInitCaller, size),
+		callers: make([]*LateInitCaller, size),
 	}
 	for i := 0; i < size; i++ {
-		cp.clients[i] = &LateInitCaller{factory: factory}
+		cp.callers[i] = &LateInitCaller{factory: factory}
 	}
 	return cp
 }
 
 func (c *PoolSender) Send(method string, ctx context.Context, v []interface{}, resp interface{}) error {
-	delay := c.clients[atomic.AddUint64(&c.times, 1)%uint64(c.size)]
+	delay := c.callers[atomic.AddUint64(&c.times, 1)%uint64(c.size)]
 	client, err := delay.Get(ctx)
 	if err != nil {
 		return err
 	}
-	err = client.Caller.Call(method, v, resp)
+	err = client.Caller.Call( method, v, resp)
 	if err != nil {
-		if _, ok := err.(*net.OpError); ok || err == rpc.ErrShutdown {
+		if err == ErrShutdown {
 			delay.Clear(client.Version)
 		}
 	}

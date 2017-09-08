@@ -1,10 +1,10 @@
 package jsonrpc
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
-	"net/rpc"
 	"sync"
 	"sync/atomic"
 )
@@ -52,7 +52,7 @@ const (
 	ClientClosed = 1
 )
 
-type tcpClient struct {
+type ClientConn struct {
 	request      request
 	writerLocker sync.Mutex
 	closed       int64
@@ -63,8 +63,21 @@ type tcpClient struct {
 	callbacks    callbacks
 }
 
-func NewTcpClient(conn io.ReadWriteCloser) *tcpClient {
-	c := &tcpClient{
+type ClientConnCallerFactory struct {
+	target string
+}
+
+func (c *ClientConnCallerFactory) Create(ctx context.Context) (Caller, error) {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", c.target)
+	if err != nil {
+		return nil, err
+	}
+	return NewClientConn(conn), nil
+}
+
+func NewClientConn(conn io.ReadWriteCloser) *ClientConn {
+	c := &ClientConn{
 		conn: conn,
 		request: request{
 			Version: "2.0",
@@ -105,14 +118,14 @@ type response struct {
 	ID      uint64          `json:"id"`
 }
 
-func (c *tcpClient) receiveResponse() {
+func (c *ClientConn) receiveResponse() {
 	for {
 		resp := &response{}
 		err := c.decoder.Decode(resp)
 		if err != nil {
 			atomic.StoreInt64(&c.closed, ClientClosed)
 			if _, ok := err.(*net.OpError); err == io.EOF || ok {
-				err = rpc.ErrShutdown
+				err = ErrShutdown
 			}
 			c.callbacks.ReleaseAll(err)
 			c.conn.Close()
@@ -121,14 +134,14 @@ func (c *tcpClient) receiveResponse() {
 		c.callbacks.Notify(resp)
 	}
 }
-func (c *tcpClient) WriteRequest(serviceMethod string, args []interface{}) (cb callback, err error) {
+func (c *ClientConn) WriteRequest(serviceMethod string, args []interface{}) (cb callback, err error) {
 	if atomic.LoadInt64(&c.closed) == ClientClosed {
-		return nil, rpc.ErrShutdown
+		return nil, ErrShutdown
 	}
 	c.writerLocker.Lock()
 	defer c.writerLocker.Unlock()
 	if atomic.LoadInt64(&c.closed) == ClientClosed {
-		return nil, rpc.ErrShutdown
+		return nil, ErrShutdown
 	}
 	c.request.ID = atomic.AddUint64(&c.sequence, 1)
 	cb = c.callbacks.Add(c.request.ID)
@@ -143,9 +156,9 @@ func (c *tcpClient) WriteRequest(serviceMethod string, args []interface{}) (cb c
 	}
 	return
 }
-func (c *tcpClient) Call(serviceMethod string, args []interface{}, reply interface{}) (err error) {
+func (c *ClientConn) Call(serviceMethod string, args []interface{}, reply interface{}) (err error) {
 	if atomic.LoadInt64(&c.closed) == ClientClosed {
-		return rpc.ErrShutdown
+		return ErrShutdown
 	}
 	cb, err := c.WriteRequest(serviceMethod, args)
 	if err != nil {
