@@ -14,7 +14,7 @@ import (
 const serviceName = "halo"
 
 type ServerInterface struct {
-	Add func(i int) (j string, err error) `rpc:"Add"`
+	Add func(i int) (j string, err error) `rpc:"add"`
 }
 
 func TestRPC(t *testing.T) {
@@ -71,6 +71,32 @@ func BenchmarkRPC3(b *testing.B) {
 }
 func BenchmarkRPC(b *testing.B) {
 	go server()
+	time.Sleep(1 * time.Second)
+
+	callerFactory := &ClientConnCallerFactory{
+		target: "127.0.0.1:12345",
+	}
+	factory := &Factory{
+		Context: context.Background(),
+		Sender:  NewFixedPool(5, callerFactory.Create).Send,
+		Timeout: time.Second,
+	}
+	itfc := &ServerInterface{}
+	err := factory.Inject(serviceName, itfc)
+	if err != nil {
+		panic(err)
+		return
+	}
+	b.Run("benchmark", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				itfc.Add(2)
+			}
+		})
+	})
+}
+
+func BenchmarkRPC4(b *testing.B) {
 	time.Sleep(1 * time.Second)
 
 	callerFactory := &ClientConnCallerFactory{
@@ -136,12 +162,12 @@ func jsonrpcserver() {
 func server() {
 	server := NewServer()
 	server.Register(serviceName, &Impl{})
-	server.Run(":12345")
+	server.Listen(":12345")
 	return
 }
 func onceServer() {
 	server := NewServer()
 	server.Register(serviceName, &Impl{})
-	server.Run(":12345")
+	server.Listen(":12345")
 	return
 }

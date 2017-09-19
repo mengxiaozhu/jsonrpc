@@ -6,139 +6,69 @@ import (
 	"io"
 	"net"
 	"reflect"
-	"sync"
 )
 
-var DefaultFilter = func(s string) string {
-	return s
+// handler rpc request and write response, not async
+type ServerHandler interface {
+	Handle(request *ServerRequest, writer ResponseWriter)
 }
 
-var DefaultServer = NewServer()
+// write response
+type ResponseWriter interface {
+	Write(i *ServerResponse)
+}
 
 func NewServer() *Server {
+	table := &FunctionTable{}
 	return &Server{
-		functions: map[string]reflect.Value{},
-		filter:    DefaultFilter,
+		Registry:      table,
+		ServerHandler: &AsyncHandler{ServerHandler: table},
 	}
-}
-
-func Listen(laddr string) error {
-	return DefaultServer.Run(laddr)
 }
 
 type Server struct {
-	functions map[string]reflect.Value
-	filter    func(string) string
+	Registry
+	ServerHandler
 }
 
-func (server *Server) Run(laddr string) error {
-	l, err := net.Listen("tcp", laddr)
-	if err != nil {
-		return err
-	}
+func (server *Server) Serve(l net.Listener) error {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			return err
 		}
-		go (&serverConn{
-			server:          server,
-			ReadWriteCloser: conn,
-			Decoder:         json.NewDecoder(conn),
-			Encoder:         json.NewEncoder(conn),
-		}).Read()
-	}
-}
-func (server *Server) Register(name string, obj interface{}) {
-	value := reflect.ValueOf(obj)
-	num := value.NumMethod()
-	for i := 0; i < num; i++ {
-		method := value.Type().Method(i)
-		if method.Type.NumOut() == 2 && method.Type.Out(1) == emptyErrorType {
-			server.functions[name+"."+server.filter(method.Name)] = value.Method(i)
-		}
+		go server.ServeConn(conn)
 	}
 }
 
-func Register(name string, obj interface{}) {
-	DefaultServer.Register(name, obj)
+func (server *Server) ServeConn(conn io.ReadWriteCloser) {
+	NewServerConnCtx(conn, server.ServerHandler).Read()
 }
 
-func ServeConn(conn io.ReadWriteCloser) {
-	(&serverConn{
-		server:          DefaultServer,
-		ReadWriteCloser: conn,
-		Decoder:         json.NewDecoder(conn),
-		Encoder:         json.NewEncoder(conn),
-	}).Read()
-}
-
-type ServerRequest struct {
-	Version string            `json:"jsonrpc"`
-	Params  []json.RawMessage `json:"params"`
-	Method  string            `json:"method"`
-	ID      uint64            `json:"id"`
-}
-
-type serverResponse struct {
-	Version string         `json:"jsonrpc"`
-	Result  interface{}    `json:"result"`
-	Error   *responseError `json:"error"`
-	ID      uint64         `json:"id"`
-}
-
-type serverConn struct {
-	io.ReadWriteCloser
-	*json.Encoder
-	*json.Decoder
-	mutex  sync.Mutex
-	server *Server
-}
-
-func (c *serverConn) Read() {
-	for {
-		req := &ServerRequest{}
-		err := c.Decode(req)
-		if err != nil {
-			c.Close()
-			return
-		}
-		go c.server.serve(req, c)
-	}
-}
-func (c *serverConn) Write(s *serverResponse) {
-	c.mutex.Lock()
-	err := c.Encode(s)
-	c.mutex.Unlock()
+func (server *Server) Listen(tcpAddr string) error {
+	l, err := net.Listen("tcp", tcpAddr)
 	if err != nil {
-		c.Close()
+		return err
 	}
+	return server.Serve(l)
 }
-func catchMethodPanic(writer *serverConn, ID uint64) {
-	err := recover()
-	if err != nil {
-		writer.Write(&serverResponse{
-			ID: ID,
-			Error: &responseError{
-				Code:    50000,
-				Message: fmt.Sprint(err),
-			},
-		})
-	}
+
+type AsyncHandler struct {
+	ServerHandler
 }
-func (server *Server) serve(request *ServerRequest, writer *serverConn) {
-	defer catchMethodPanic(writer, request.ID)
-	fn, has := server.functions[request.Method]
-	if !has {
-		writer.Write(&serverResponse{
-			ID: request.ID,
-			Error: &responseError{
-				Code:    -32601,
-				Message: "Method not found",
-			},
-		})
-		return
-	}
+
+func (h *AsyncHandler) Handle(req *ServerRequest, resp ResponseWriter) {
+	go h.ServerHandler.Handle(req, resp)
+}
+
+type Executor interface {
+	Execute(request *ServerRequest, writer ResponseWriter)
+}
+
+type FunctionExecutor reflect.Value
+
+func (executor FunctionExecutor) Execute(request *ServerRequest, writer ResponseWriter) {
+	fn := reflect.Value(executor)
 	inNum := fn.Type().NumIn()
 	args := []reflect.Value{}
 
@@ -147,19 +77,31 @@ func (server *Server) serve(request *ServerRequest, writer *serverConn) {
 		json.Unmarshal(request.Params[i], arg.Interface())
 		args = append(args, arg.Elem())
 	}
+
+	defer recoverCallPanic(writer, request.ID)
 	resp := fn.Call(args)
 	if resp[1].IsNil() {
-		writer.Write(&serverResponse{
+		writer.Write(&ServerResponse{
 			ID:     request.ID,
 			Result: resp[0].Interface(),
 		})
 	} else {
-		writer.Write(&serverResponse{
+		writer.Write(&ServerResponse{
 			ID: request.ID,
 			Error: &responseError{
 				Code:    50000,
 				Message: fmt.Sprint(resp[1].Interface()),
 			},
 		})
+	}
+}
+
+func recoverCallPanic(writer ResponseWriter, ID uint64) {
+	panicThing := recover()
+	if panicThing != nil {
+		writer.Write(CreateErrorResponse(ID, &responseError{
+			Code:    32603,
+			Message: fmt.Sprint(panicThing),
+		}))
 	}
 }
