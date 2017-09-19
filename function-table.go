@@ -10,6 +10,13 @@ type Registry interface {
 	Find(method string) (fn Executor, has bool)
 }
 
+func NewFunctionTable() *FunctionTable {
+	return &FunctionTable{
+		functions:  map[string]FunctionExecutor{},
+		nameMapper: DefaultNameMapper,
+	}
+}
+
 type FunctionTable struct {
 	functions  map[string]FunctionExecutor
 	nameMapper func(string) string
@@ -37,9 +44,5 @@ func (table *FunctionTable) Handle(req *ServerRequest, resp ResponseWriter) {
 		fn.Execute(req, resp)
 		return
 	}
-
-	resp.Write(&ServerResponse{
-		Version: Version,
-		Error:   MethodNotFoundResponseError,
-	})
+	resp.Write(CreateErrorResponse(req.ID, MethodNotFoundResponseError))
 }

@@ -19,7 +19,7 @@ type ResponseWriter interface {
 }
 
 func NewServer() *Server {
-	table := &FunctionTable{}
+	table := NewFunctionTable()
 	return &Server{
 		Registry:      table,
 		ServerHandler: &AsyncHandler{ServerHandler: table},
@@ -89,7 +89,7 @@ func (executor FunctionExecutor) Execute(request *ServerRequest, writer Response
 		writer.Write(&ServerResponse{
 			ID: request.ID,
 			Error: &responseError{
-				Code:    50000,
+				Code:    ReturnErrorCode,
 				Message: fmt.Sprint(resp[1].Interface()),
 			},
 		})
@@ -100,7 +100,7 @@ func recoverCallPanic(writer ResponseWriter, ID uint64) {
 	panicThing := recover()
 	if panicThing != nil {
 		writer.Write(CreateErrorResponse(ID, &responseError{
-			Code:    32603,
+			Code:    PanicErrorCode,
 			Message: fmt.Sprint(panicThing),
 		}))
 	}

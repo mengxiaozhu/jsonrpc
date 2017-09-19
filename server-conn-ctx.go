@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"encoding/json"
 	"io"
-	"sync"
 )
 
 func NewServerConnCtx(conn io.ReadWriteCloser, handler ServerHandler) *serverConnCtx {
@@ -19,7 +18,6 @@ type serverConnCtx struct {
 	io.ReadWriteCloser
 	*json.Encoder
 	*json.Decoder
-	mutex   sync.Mutex
 	handler ServerHandler
 }
 

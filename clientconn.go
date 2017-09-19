@@ -97,10 +97,11 @@ type request struct {
 	Method  string        `json:"method"`
 	ID      uint64        `json:"id"`
 }
+type responseErrorCode int
 type responseError struct {
-	Code    int         `json:"code"`
-	Data    interface{} `json:"data"`
-	Message string      `json:"message"`
+	Code    responseErrorCode `json:"code"`
+	Data    interface{}       `json:"data"`
+	Message string            `json:"message"`
 }
 
 func (r *responseError) Error() string {
